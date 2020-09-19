@@ -47,7 +47,30 @@ static void onMouse(int event, int x, int y)
     }
 }
 
-int main(int argc, const char** argv)
+int main()
 {
-    
+    cv::VideoCapture capture;
+    cv::Rect trackWindow;
+
+    capture.open(0);
+
+    bool paused = false;
+
+    cv::Mat frame;
+
+    while (true)
+    {
+        if (!paused)
+        {
+            capture >> frame;
+            if (frame.empty()) break;
+        }
+
+        frame.copyTo(image);
+
+        if (!paused)
+        {
+            
+        }
+    }
 }
