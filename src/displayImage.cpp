@@ -1,4 +1,4 @@
-// g++ -std=c++17 `pkg-config --cflags --libs opencv4` main.cpp -o DisplayImage
+// g++ -std=c++17 `pkg-config --cflags --libs opencv4` displayImage.cpp -o DisplayImage
 
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
