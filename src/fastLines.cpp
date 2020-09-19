@@ -1,4 +1,5 @@
 // g++ -std=c++17 `pkg-config --cflags --libs opencv4` fastLines.cpp -o FastLines
+// ./FastLines forest.jpg
 
 #include <iostream>
 #include "opencv2/imgproc.hpp"
