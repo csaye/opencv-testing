@@ -1,4 +1,4 @@
-// g++ -std=c++17 `pkg-config --cflags --libs opencv4` camShiftDemo.cpp -o CamShiftBreaker
+// g++ -std=c++17 `pkg-config --cflags --libs opencv4` camShiftBreaker.cpp -o CamShiftBreaker
 // ./CamShiftBreaker
 
 #include "opencv2/core/utility.hpp"
@@ -11,7 +11,6 @@
 using namespace cv;
 using namespace std;
 Mat image;
-bool backprojMode = false;
 bool selectObject = false;
 int trackObject = 0;
 bool showHist = true;
@@ -47,19 +46,8 @@ string hot_keys =
     "\n\nHot keys: \n"
     "\tESC - quit the program\n"
     "\tc - stop the tracking\n"
-    "\tb - switch to/from backprojection view\n"
-    "\th - show/hide object histogram\n"
     "\tp - pause video\n"
     "To initialize tracking, select the object with mouse\n";
-static void help(const char** argv)
-{
-    cout << "\nThis is a demo that shows mean-shift based tracking\n"
-            "You select a color objects such as your face and it tracks it.\n"
-            "This reads from video camera (0 by default, or the camera number the user enters\n"
-            "Usage: \n\t";
-    cout << argv[0] << " [camera number]\n";
-    cout << hot_keys;
-}
 const char* keys =
 {
     "{help h | | show help message}{@camera_number| 0 | camera number}"
@@ -72,28 +60,19 @@ int main( int argc, const char** argv )
     float hranges[] = {0,180};
     const float* phranges = hranges;
     CommandLineParser parser(argc, argv, keys);
-    if (parser.has("help"))
-    {
-        help(argv);
-        return 0;
-    }
     int camNum = parser.get<int>(0);
     cap.open(camNum);
     if( !cap.isOpened() )
     {
-        help(argv);
         cout << "***Could not initialize capturing...***\n";
         cout << "Current parameter's value: \n";
         parser.printMessage();
         return -1;
     }
     cout << hot_keys;
-    namedWindow( "Histogram", 0 );
+    // namedWindow( "Histogram", 0 );
     namedWindow( "CamShift Demo", 0 );
     setMouseCallback( "CamShift Demo", onMouse, 0 );
-    createTrackbar( "Vmin", "CamShift Demo", &vmin, 256, 0 );
-    createTrackbar( "Vmax", "CamShift Demo", &vmax, 256, 0 );
-    createTrackbar( "Smin", "CamShift Demo", &smin, 256, 0 );
     Mat frame, hsv, hue, mask, hist, histimg = Mat::zeros(200, 320, CV_8UC3), backproj;
     bool paused = false;
     for(;;)
@@ -130,13 +109,6 @@ int main( int argc, const char** argv )
                     for( int i = 0; i < hsize; i++ )
                         buf.at<Vec3b>(i) = Vec3b(saturate_cast<uchar>(i*180./hsize), 255, 255);
                     cvtColor(buf, buf, COLOR_HSV2BGR);
-                    for( int i = 0; i < hsize; i++ )
-                    {
-                        int val = saturate_cast<int>(hist.at<float>(i)*histimg.rows/255);
-                        rectangle( histimg, Point(i*binW,histimg.rows),
-                                   Point((i+1)*binW,histimg.rows - val),
-                                   Scalar(buf.at<Vec3b>(i)), -1, 8 );
-                    }
                 }
                 // Perform CAMShift
                 calcBackProject(&hue, 1, 0, hist, backproj, &phranges);
@@ -150,8 +122,6 @@ int main( int argc, const char** argv )
                                        trackWindow.x + r, trackWindow.y + r) &
                                   Rect(0, 0, cols, rows);
                 }
-                if( backprojMode )
-                    cvtColor( backproj, image, COLOR_GRAY2BGR );
                 ellipse( image, trackBox, Scalar(0,0,255), 3, LINE_AA );
             }
         }
@@ -163,31 +133,19 @@ int main( int argc, const char** argv )
             bitwise_not(roi, roi);
         }
         imshow( "CamShift Demo", image );
-        imshow( "Histogram", histimg );
+        // imshow( "Histogram", histimg );
         char c = (char)waitKey(10);
         if( c == 27 )
             break;
         switch(c)
         {
-        case 'b':
-            backprojMode = !backprojMode;
-            break;
-        case 'c':
-            trackObject = 0;
-            histimg = Scalar::all(0);
-            break;
-        case 'h':
-            showHist = !showHist;
-            if( !showHist )
-                destroyWindow( "Histogram" );
-            else
-                namedWindow( "Histogram", 1 );
-            break;
-        case 'p':
-            paused = !paused;
-            break;
-        default:
-            ;
+            case 'c':
+                trackObject = 0;
+                histimg = Scalar::all(0);
+                break;
+            case 'p':
+                paused = !paused;
+                break;
         }
     }
     return 0;
