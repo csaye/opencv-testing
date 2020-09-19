@@ -1,5 +1,5 @@
-// g++ -std=c++17 `pkg-config --cflags --libs opencv4` faceDetector.cpp -o FaceDetector
-// ./FaceDetector 0
+// g++ -std=c++17 `pkg-config --cflags --libs opencv4` peopleDetector.cpp -o PeopleDetector
+// ./PeopleDetector 0
 
 #include <opencv2/objdetect.hpp>
 #include <opencv2/highgui.hpp>
