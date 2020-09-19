@@ -1,244 +1,193 @@
 // g++ -std=c++17 `pkg-config --cflags --libs opencv4` faceDetector.cpp -o FaceDetector
 
-#include "opencv2/objdetect.hpp"
-#include "opencv2/highgui.hpp"
+#include "opencv2/core/utility.hpp"
+#include "opencv2/video/tracking.hpp"
 #include "opencv2/imgproc.hpp"
 #include "opencv2/videoio.hpp"
+#include "opencv2/highgui.hpp"
 #include <iostream>
-using namespace std;
+#include <ctype.h>
 using namespace cv;
+using namespace std;
+Mat image;
+bool backprojMode = false;
+bool selectObject = false;
+int trackObject = 0;
+bool showHist = true;
+Point origin;
+Rect selection;
+int vmin = 10, vmax = 256, smin = 30;
+// User draws box around object to track. This triggers CAMShift to start tracking
+static void onMouse( int event, int x, int y, int, void* )
+{
+    if( selectObject )
+    {
+        selection.x = MIN(x, origin.x);
+        selection.y = MIN(y, origin.y);
+        selection.width = std::abs(x - origin.x);
+        selection.height = std::abs(y - origin.y);
+        selection &= Rect(0, 0, image.cols, image.rows);
+    }
+    switch( event )
+    {
+    case EVENT_LBUTTONDOWN:
+        origin = Point(x,y);
+        selection = Rect(x,y,0,0);
+        selectObject = true;
+        break;
+    case EVENT_LBUTTONUP:
+        selectObject = false;
+        if( selection.width > 0 && selection.height > 0 )
+            trackObject = -1;   // Set up CAMShift properties in main() loop
+        break;
+    }
+}
+string hot_keys =
+    "\n\nHot keys: \n"
+    "\tESC - quit the program\n"
+    "\tc - stop the tracking\n"
+    "\tb - switch to/from backprojection view\n"
+    "\th - show/hide object histogram\n"
+    "\tp - pause video\n"
+    "To initialize tracking, select the object with mouse\n";
 static void help(const char** argv)
 {
-    cout << "\nThis program demonstrates the use of cv::CascadeClassifier class to detect objects (Face + eyes). You can use Haar or LBP features.\n"
-            "This classifier can recognize many kinds of rigid objects, once the appropriate classifier is trained.\n"
-            "It's most known use is for faces.\n"
-            "Usage:\n"
-        <<  argv[0]
-        <<  "   [--cascade=<cascade_path> this is the primary trained classifier such as frontal face]\n"
-            "   [--nested-cascade[=nested_cascade_path this an optional secondary classifier such as eyes]]\n"
-            "   [--scale=<image scale greater or equal to 1, try 1.3 for example>]\n"
-            "   [--try-flip]\n"
-            "   [filename|camera_index]\n\n"
-            "example:\n"
-        <<  argv[0]
-        <<  " --cascade=\"data/haarcascades/haarcascade_frontalface_alt.xml\" --nested-cascade=\"data/haarcascades/haarcascade_eye_tree_eyeglasses.xml\" --scale=1.3\n\n"
-            "During execution:\n\tHit any key to quit.\n"
-            "\tUsing OpenCV version " << CV_VERSION << "\n" << endl;
+    cout << "\nThis is a demo that shows mean-shift based tracking\n"
+            "You select a color objects such as your face and it tracks it.\n"
+            "This reads from video camera (0 by default, or the camera number the user enters\n"
+            "Usage: \n\t";
+    cout << argv[0] << " [camera number]\n";
+    cout << hot_keys;
 }
-void detectAndDraw( Mat& img, CascadeClassifier& cascade,
-                    CascadeClassifier& nestedCascade,
-                    double scale, bool tryflip );
-string cascadeName;
-string nestedCascadeName;
+const char* keys =
+{
+    "{help h | | show help message}{@camera_number| 0 | camera number}"
+};
 int main( int argc, const char** argv )
 {
-    VideoCapture capture;
-    Mat frame, image;
-    string inputName;
-    bool tryflip;
-    CascadeClassifier cascade, nestedCascade;
-    double scale;
-    cv::CommandLineParser parser(argc, argv,
-        "{help h||}"
-        "{cascade|data/haarcascades/haarcascade_frontalface_alt.xml|}"
-        "{nested-cascade|data/haarcascades/haarcascade_eye_tree_eyeglasses.xml|}"
-        "{scale|1|}{try-flip||}{@filename||}"
-    );
+    VideoCapture cap;
+    Rect trackWindow;
+    int hsize = 16;
+    float hranges[] = {0,180};
+    const float* phranges = hranges;
+    CommandLineParser parser(argc, argv, keys);
     if (parser.has("help"))
     {
         help(argv);
         return 0;
     }
-    cascadeName = parser.get<string>("cascade");
-    nestedCascadeName = parser.get<string>("nested-cascade");
-    scale = parser.get<double>("scale");
-    if (scale < 1)
-        scale = 1;
-    tryflip = parser.has("try-flip");
-    inputName = parser.get<string>("@filename");
-    if (!parser.check())
+    int camNum = parser.get<int>(0);
+    cap.open(camNum);
+    if( !cap.isOpened() )
     {
-        parser.printErrors();
-        return 0;
-    }
-    if (!nestedCascade.load(samples::findFileOrKeep(nestedCascadeName)))
-        cerr << "WARNING: Could not load classifier cascade for nested objects" << endl;
-    if (!cascade.load(samples::findFile(cascadeName)))
-    {
-        cerr << "ERROR: Could not load classifier cascade" << endl;
         help(argv);
+        cout << "***Could not initialize capturing...***\n";
+        cout << "Current parameter's value: \n";
+        parser.printMessage();
         return -1;
     }
-    if( inputName.empty() || (isdigit(inputName[0]) && inputName.size() == 1) )
+    cout << hot_keys;
+    namedWindow( "Histogram", 0 );
+    namedWindow( "CamShift Demo", 0 );
+    setMouseCallback( "CamShift Demo", onMouse, 0 );
+    createTrackbar( "Vmin", "CamShift Demo", &vmin, 256, 0 );
+    createTrackbar( "Vmax", "CamShift Demo", &vmax, 256, 0 );
+    createTrackbar( "Smin", "CamShift Demo", &smin, 256, 0 );
+    Mat frame, hsv, hue, mask, hist, histimg = Mat::zeros(200, 320, CV_8UC3), backproj;
+    bool paused = false;
+    for(;;)
     {
-        int camera = inputName.empty() ? 0 : inputName[0] - '0';
-        if(!capture.open(camera))
+        if( !paused )
         {
-            cout << "Capture from camera #" <<  camera << " didn't work" << endl;
-            return 1;
-        }
-    }
-    else if (!inputName.empty())
-    {
-        image = imread(samples::findFileOrKeep(inputName), IMREAD_COLOR);
-        if (image.empty())
-        {
-            if (!capture.open(samples::findFileOrKeep(inputName)))
-            {
-                cout << "Could not read " << inputName << endl;
-                return 1;
-            }
-        }
-    }
-    else
-    {
-        image = imread(samples::findFile("lena.jpg"), IMREAD_COLOR);
-        if (image.empty())
-        {
-            cout << "Couldn't read lena.jpg" << endl;
-            return 1;
-        }
-    }
-    if( capture.isOpened() )
-    {
-        cout << "Video capturing has been started ..." << endl;
-        for(;;)
-        {
-            capture >> frame;
+            cap >> frame;
             if( frame.empty() )
                 break;
-            Mat frame1 = frame.clone();
-            detectAndDraw( frame1, cascade, nestedCascade, scale, tryflip );
-            char c = (char)waitKey(10);
-            if( c == 27 || c == 'q' || c == 'Q' )
-                break;
         }
-    }
-    else
-    {
-        cout << "Detecting face(s) in " << inputName << endl;
-        if( !image.empty() )
+        frame.copyTo(image);
+        if( !paused )
         {
-            detectAndDraw( image, cascade, nestedCascade, scale, tryflip );
-            waitKey(0);
-        }
-        else if( !inputName.empty() )
-        {
-            /* assume it is a text file containing the
-            list of the image filenames to be processed - one per line */
-            FILE* f = fopen( inputName.c_str(), "rt" );
-            if( f )
+            cvtColor(image, hsv, COLOR_BGR2HSV);
+            if( trackObject )
             {
-                char buf[1000+1];
-                while( fgets( buf, 1000, f ) )
+                int _vmin = vmin, _vmax = vmax;
+                inRange(hsv, Scalar(0, smin, MIN(_vmin,_vmax)),
+                        Scalar(180, 256, MAX(_vmin, _vmax)), mask);
+                int ch[] = {0, 0};
+                hue.create(hsv.size(), hsv.depth());
+                mixChannels(&hsv, 1, &hue, 1, ch, 1);
+                if( trackObject < 0 )
                 {
-                    int len = (int)strlen(buf);
-                    while( len > 0 && isspace(buf[len-1]) )
-                        len--;
-                    buf[len] = '\0';
-                    cout << "file " << buf << endl;
-                    image = imread( buf, 1 );
-                    if( !image.empty() )
+                    // Object has been selected by user, set up CAMShift search properties once
+                    Mat roi(hue, selection), maskroi(mask, selection);
+                    calcHist(&roi, 1, 0, maskroi, hist, 1, &hsize, &phranges);
+                    normalize(hist, hist, 0, 255, NORM_MINMAX);
+                    trackWindow = selection;
+                    trackObject = 1; // Don't set up again, unless user selects new ROI
+                    histimg = Scalar::all(0);
+                    int binW = histimg.cols / hsize;
+                    Mat buf(1, hsize, CV_8UC3);
+                    for( int i = 0; i < hsize; i++ )
+                        buf.at<Vec3b>(i) = Vec3b(saturate_cast<uchar>(i*180./hsize), 255, 255);
+                    cvtColor(buf, buf, COLOR_HSV2BGR);
+                    for( int i = 0; i < hsize; i++ )
                     {
-                        detectAndDraw( image, cascade, nestedCascade, scale, tryflip );
-                        char c = (char)waitKey(0);
-                        if( c == 27 || c == 'q' || c == 'Q' )
-                            break;
-                    }
-                    else
-                    {
-                        cerr << "Aw snap, couldn't read image " << buf << endl;
+                        int val = saturate_cast<int>(hist.at<float>(i)*histimg.rows/255);
+                        rectangle( histimg, Point(i*binW,histimg.rows),
+                                   Point((i+1)*binW,histimg.rows - val),
+                                   Scalar(buf.at<Vec3b>(i)), -1, 8 );
                     }
                 }
-                fclose(f);
+                // Perform CAMShift
+                calcBackProject(&hue, 1, 0, hist, backproj, &phranges);
+                backproj &= mask;
+                RotatedRect trackBox = CamShift(backproj, trackWindow,
+                                    TermCriteria( TermCriteria::EPS | TermCriteria::COUNT, 10, 1 ));
+                if( trackWindow.area() <= 1 )
+                {
+                    int cols = backproj.cols, rows = backproj.rows, r = (MIN(cols, rows) + 5)/6;
+                    trackWindow = Rect(trackWindow.x - r, trackWindow.y - r,
+                                       trackWindow.x + r, trackWindow.y + r) &
+                                  Rect(0, 0, cols, rows);
+                }
+                if( backprojMode )
+                    cvtColor( backproj, image, COLOR_GRAY2BGR );
+                ellipse( image, trackBox, Scalar(0,0,255), 3, LINE_AA );
             }
+        }
+        else if( trackObject < 0 )
+            paused = false;
+        if( selectObject && selection.width > 0 && selection.height > 0 )
+        {
+            Mat roi(image, selection);
+            bitwise_not(roi, roi);
+        }
+        imshow( "CamShift Demo", image );
+        imshow( "Histogram", histimg );
+        char c = (char)waitKey(10);
+        if( c == 27 )
+            break;
+        switch(c)
+        {
+        case 'b':
+            backprojMode = !backprojMode;
+            break;
+        case 'c':
+            trackObject = 0;
+            histimg = Scalar::all(0);
+            break;
+        case 'h':
+            showHist = !showHist;
+            if( !showHist )
+                destroyWindow( "Histogram" );
+            else
+                namedWindow( "Histogram", 1 );
+            break;
+        case 'p':
+            paused = !paused;
+            break;
+        default:
+            ;
         }
     }
     return 0;
-}
-void detectAndDraw( Mat& img, CascadeClassifier& cascade,
-                    CascadeClassifier& nestedCascade,
-                    double scale, bool tryflip )
-{
-    double t = 0;
-    vector<Rect> faces, faces2;
-    const static Scalar colors[] =
-    {
-        Scalar(255,0,0),
-        Scalar(255,128,0),
-        Scalar(255,255,0),
-        Scalar(0,255,0),
-        Scalar(0,128,255),
-        Scalar(0,255,255),
-        Scalar(0,0,255),
-        Scalar(255,0,255)
-    };
-    Mat gray, smallImg;
-    cvtColor( img, gray, COLOR_BGR2GRAY );
-    double fx = 1 / scale;
-    resize( gray, smallImg, Size(), fx, fx, INTER_LINEAR_EXACT );
-    equalizeHist( smallImg, smallImg );
-    t = (double)getTickCount();
-    cascade.detectMultiScale( smallImg, faces,
-        1.1, 2, 0
-        //|CASCADE_FIND_BIGGEST_OBJECT
-        //|CASCADE_DO_ROUGH_SEARCH
-        |CASCADE_SCALE_IMAGE,
-        Size(30, 30) );
-    if( tryflip )
-    {
-        flip(smallImg, smallImg, 1);
-        cascade.detectMultiScale( smallImg, faces2,
-                                 1.1, 2, 0
-                                 //|CASCADE_FIND_BIGGEST_OBJECT
-                                 //|CASCADE_DO_ROUGH_SEARCH
-                                 |CASCADE_SCALE_IMAGE,
-                                 Size(30, 30) );
-        for( vector<Rect>::const_iterator r = faces2.begin(); r != faces2.end(); ++r )
-        {
-            faces.push_back(Rect(smallImg.cols - r->x - r->width, r->y, r->width, r->height));
-        }
-    }
-    t = (double)getTickCount() - t;
-    printf( "detection time = %g ms\n", t*1000/getTickFrequency());
-    for ( size_t i = 0; i < faces.size(); i++ )
-    {
-        Rect r = faces[i];
-        Mat smallImgROI;
-        vector<Rect> nestedObjects;
-        Point center;
-        Scalar color = colors[i%8];
-        int radius;
-        double aspect_ratio = (double)r.width/r.height;
-        if( 0.75 < aspect_ratio && aspect_ratio < 1.3 )
-        {
-            center.x = cvRound((r.x + r.width*0.5)*scale);
-            center.y = cvRound((r.y + r.height*0.5)*scale);
-            radius = cvRound((r.width + r.height)*0.25*scale);
-            circle( img, center, radius, color, 3, 8, 0 );
-        }
-        else
-            rectangle( img, Point(cvRound(r.x*scale), cvRound(r.y*scale)),
-                       Point(cvRound((r.x + r.width-1)*scale), cvRound((r.y + r.height-1)*scale)),
-                       color, 3, 8, 0);
-        if( nestedCascade.empty() )
-            continue;
-        smallImgROI = smallImg( r );
-        nestedCascade.detectMultiScale( smallImgROI, nestedObjects,
-            1.1, 2, 0
-            //|CASCADE_FIND_BIGGEST_OBJECT
-            //|CASCADE_DO_ROUGH_SEARCH
-            //|CASCADE_DO_CANNY_PRUNING
-            |CASCADE_SCALE_IMAGE,
-            Size(30, 30) );
-        for ( size_t j = 0; j < nestedObjects.size(); j++ )
-        {
-            Rect nr = nestedObjects[j];
-            center.x = cvRound((r.x + nr.x + nr.width*0.5)*scale);
-            center.y = cvRound((r.y + nr.y + nr.height*0.5)*scale);
-            radius = cvRound((nr.width + nr.height)*0.25*scale);
-            circle( img, center, radius, color, 3, 8, 0 );
-        }
-    }
-    imshow( "result", img );
 }
