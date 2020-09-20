@@ -2,15 +2,11 @@
 // ./DirectionDetector
 
 #include <iostream>
-// #include <ctype.h>
 
 #include "opencv2/core/utility.hpp"
 #include "opencv2/video/tracking.hpp"
 #include "opencv2/imgproc.hpp"
-// #include "opencv2/videoio.hpp"
 #include "opencv2/highgui.hpp"
-
-// using namespace cv;
 
 cv::Mat image;
 
@@ -122,6 +118,7 @@ int main()
                 }
 
                 cv::ellipse(image, trackBox, cv::Scalar(0, 0, 255), 3, cv::LINE_AA);
+                // parseSelectionPosition(trackBox.center.x, trackBox.center.y);
             }
         }
         else if (trackObject < 0) paused = false;
