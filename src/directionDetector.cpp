@@ -21,7 +21,7 @@ bool selectObject = false;
 int trackObject = 0;
 int vMin = 10, vMax = 256, sMin = 30;
 
-static void onMouse(int event, int x, int y)
+static void onMouse(int event, int x, int y, int, void*)
 {
     if (selectObject)
     {
@@ -65,6 +65,9 @@ int main()
     cv::Mat frame, hsv, hue, mask, hist, backProj;
     cv::Mat histImg = cv::Mat::zeros(200, 320, CV_8UC3);
 
+    cv::namedWindow("DirectionDetector", 0);
+    cv::setMouseCallback("DirectionDetector", onMouse, 0);
+
     while (true)
     {
         if (!paused)
@@ -105,25 +108,31 @@ int main()
                 //     cv::cvtColor(buf, buf, cv::COLOR_HSV2BGR);
                 // }
 
-                cv::calcBackProject(&hue, 1, 0, hist, backProj, &phRanges);
-                backProj &= mask;
-                cv::RotatedRect trackBox = cv::CamShift(backProj, trackWindow, cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::COUNT, 10, 1));
+                // cv::calcBackProject(&hue, 1, 0, hist, backProj, &phRanges);
+                // backProj &= mask;
+                // cv::RotatedRect trackBox = cv::CamShift(backProj, trackWindow, cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::COUNT, 10, 1));
 
-                if (trackWindow.area() <= 1)
-                {
-                    int cols = backProj.cols;
-                    int rows = backProj.rows;
-                    int r = (MIN(cols, rows)) / 6;
+                // if (trackWindow.area() <= 1)
+                // {
+                //     int cols = backProj.cols;
+                //     int rows = backProj.rows;
+                //     int r = (MIN(cols, rows)) / 6;
 
-                    trackWindow = cv::Rect(trackWindow.x - r, trackWindow.y - r, trackWindow.x + r, trackWindow.y + r) & cv::Rect(0, 0, cols, rows);
-                }
+                //     trackWindow = cv::Rect(trackWindow.x - r, trackWindow.y - r, trackWindow.x + r, trackWindow.y + r) & cv::Rect(0, 0, cols, rows);
+                // }
 
-                cv::ellipse(image, trackBox, cv::Scalar(0, 0, 255), 3, cv::LINE_AA);
+                // cv::ellipse(image, trackBox, cv::Scalar(0, 0, 255), 3, cv::LINE_AA);
             }
         }
         else if (trackObject < 0) paused = false;
 
-        imshow("Camera", image);
+        if (selectObject && selection.width > 0 && selection.height > 0)
+        {
+            cv::Mat roi(image, selection);
+            cv::bitwise_not(roi, roi);
+        }
+
+        imshow("DirectionDetector", image);
 
         char ch = (char)cv::waitKey(10);
         if (ch == 27) break;
