@@ -1,12 +1,12 @@
 // g++ -std=c++17 `pkg-config --cflags --libs opencv4` directionDetector.cpp -o DirectionDetector
 // ./DirectionDetector
 
-// #include <iostream>
+#include <iostream>
 // #include <ctype.h>
 
 #include "opencv2/core/utility.hpp"
 // #include "opencv2/video/tracking.hpp"
-// #include "opencv2/imgproc.hpp"
+#include "opencv2/imgproc.hpp"
 // #include "opencv2/videoio.hpp"
 #include "opencv2/highgui.hpp"
 
@@ -49,6 +49,8 @@ static void onMouse(int event, int x, int y)
 
 int main()
 {
+    std::cout << "Controls:\nLeft click drag to select tracking object\nC to clear tracker\nP to pause\nEsc to quit";
+
     cv::VideoCapture capture;
     cv::Rect trackWindow;
 
@@ -70,7 +72,25 @@ int main()
 
         if (!paused)
         {
-            
+            if (trackObject)
+            {
+                cv::RotatedRect trackBox;
+                cv::ellipse(image, trackBox, cv::Scalar(0, 0, 255), 3, cv::LINE_AA);
+            }
+        }
+
+        imshow("Camera", image);
+
+        char ch = (char)cv::waitKey(10);
+        if (ch == 27) break;
+        switch (ch)
+        {
+            case 'c':
+                trackObject = 0;
+                break;
+            case 'p':
+                paused = !paused;
+                break;
         }
     }
 }
